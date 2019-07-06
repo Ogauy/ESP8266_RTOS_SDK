@@ -1,3 +1,3 @@
 hello xingxing
 hello world
-HELLO KITTY
+Hello Kitty
