@@ -6,6 +6,9 @@
    software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
    CONDITIONS OF ANY KIND, either express or implied.
 */
+//TCP 客户端发什么，客户端回复什么
+
+
 #include <string.h>
 #include <sys/param.h>
 #include "freertos/FreeRTOS.h"
@@ -133,6 +136,7 @@ static void tcp_server_task(void *pvParameters)
 
 #ifdef CONFIG_EXAMPLE_IPV4
         struct sockaddr_in destAddr;
+//        可以理解为获取路由器分配的IP地址
         destAddr.sin_addr.s_addr = htonl(INADDR_ANY);
         destAddr.sin_family = AF_INET;
         destAddr.sin_port = htons(PORT);
