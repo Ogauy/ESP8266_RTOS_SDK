@@ -8,6 +8,7 @@
 */
 #include <string.h>
 #include <sys/param.h>
+#include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
@@ -28,6 +29,8 @@
    If you'd rather not, just change the below entries to strings with
    the config you want - ie #define EXAMPLE_WIFI_SSID "mywifissid"
 */
+
+//局域网通信的时候记得关闭防火墙 --- 不然会出现无法通信的情况
 #define EXAMPLE_WIFI_SSID CONFIG_WIFI_SSID
 #define EXAMPLE_WIFI_PASS CONFIG_WIFI_PASSWORD
 
@@ -54,7 +57,6 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
 {
     /* For accessing reason codes in case of disconnection */
     system_event_info_t *info = &event->event_info;
-
     switch (event->event_id) {
     case SYSTEM_EVENT_STA_START:
         esp_wifi_connect();
@@ -64,6 +66,7 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
 #ifdef CONFIG_EXAMPLE_IPV6
         /* enable ipv6 */
         tcpip_adapter_create_ip6_linklocal(TCPIP_ADAPTER_IF_STA);
+        ESP_LOGI(TAG,"CONFIG_EXAMPLE_IPV6")
 #endif
         break;
     case SYSTEM_EVENT_STA_GOT_IP:
@@ -80,6 +83,7 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
         xEventGroupClearBits(wifi_event_group, IPV4_GOTIP_BIT);
 #ifdef CONFIG_EXAMPLE_IPV6
         xEventGroupClearBits(wifi_event_group, IPV6_GOTIP_BIT);
+        ESP_LOGI(TAG,"CONFIG_EXAMPLE_IPV6")
 #endif
         break;
     case SYSTEM_EVENT_AP_STA_GOT_IP6:
@@ -135,6 +139,8 @@ static void tcp_client_task(void *pvParameters)
     char addr_str[128];
     int addr_family;
     int ip_protocol;
+	ESP_LOGI(TAG,"IP = %s",HOST_IP_ADDR);
+	ESP_LOGI(TAG,"Port = %d", PORT);
 
     while (1) {
 
@@ -146,6 +152,7 @@ static void tcp_client_task(void *pvParameters)
         addr_family = AF_INET;
         ip_protocol = IPPROTO_IP;
         inet_ntoa_r(destAddr.sin_addr, addr_str, sizeof(addr_str) - 1);
+        ESP_LOGI(TAG,"CONFIG_EXAMPLE_IPV4 --- xingxing");
 #else // IPV6
         struct sockaddr_in6 destAddr;
         inet6_aton(HOST_IP_ADDR, &destAddr.sin6_addr);
@@ -154,8 +161,8 @@ static void tcp_client_task(void *pvParameters)
         addr_family = AF_INET6;
         ip_protocol = IPPROTO_IPV6;
         inet6_ntoa_r(destAddr.sin6_addr, addr_str, sizeof(addr_str) - 1);
+        ESP_LOGI(TAG,"CONFIG_EXAMPLE_IPV6");
 #endif
-
         int sock =  socket(addr_family, SOCK_STREAM, ip_protocol);
         if (sock < 0) {
             ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
