@@ -18,20 +18,26 @@
 #include <stdio.h>
 #include <string.h>
 
+//Base
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "esp_event_loop.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
-
+//system
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
-
+#include "freertos/queue.h"
+//Application
+#include "driver/gpio.h"
 #include "MQTTClient.h"
 
 /* FreeRTOS event group to signal when we are connected & ready to make a request */
 static EventGroupHandle_t wifi_event_group;
+
+/* Data interaction Queue for MQTT and GPIO Queue */
+static xQueueHandle gpio_evt_queue = NULL;
 
 /* The event group allows multiple bits for each event,
    but we only care about one event - are we connected
@@ -39,10 +45,19 @@ static EventGroupHandle_t wifi_event_group;
 const int CONNECTED_BIT = BIT0;
 
 #define MQTT_CLIENT_THREAD_NAME         "mqtt_client_thread"
-#define MQTT_CLIENT_THREAD_STACK_WORDS  4096
+#define MQTT_CLIENT_THREAD_STACK_WORDS  2048
 #define MQTT_CLIENT_THREAD_PRIO         8
 
+
+#define LED_CLIENT_THREAD_NAME         "led_client_thread"
+#define LED_CLIENT_THREAD_STACK_WORDS  1024
+#define LED_CLIENT_THREAD_PRIO         11
+
 static const char *TAG = "example";
+
+
+#define GPIO_OUTPUT_IO_0    2
+#define GPIO_OUTPUT_PIN_SEL (1ULL<<GPIO_OUTPUT_IO_0)
 
 static esp_err_t event_handler(void *ctx, system_event_t *event)
 {
@@ -97,8 +112,10 @@ static void initialise_wifi(void)
 
 static void messageArrived(MessageData *data)
 {
-    ESP_LOGI(TAG, "Message arrived[len:%u]: %.*s", \
+	ESP_LOGI(TAG, "Message arrived[len:%u]: %.*s", \
            data->message->payloadlen, data->message->payloadlen, (char *)data->message->payload);
+    //Send data to related processes        send address
+    xQueueSendFromISR(gpio_evt_queue,data->message->payload, NULL);
 }
 
 static void mqtt_client_thread(void *pvParameters)
@@ -108,7 +125,7 @@ static void mqtt_client_thread(void *pvParameters)
     Network network;
     int rc = 0;
     char clientID[32] = {0};
-    uint32_t count = 0;
+//    uint32_t count = 0;
 
     ESP_LOGI(TAG, "ssid:%s passwd:%s sub:%s qos:%u pub:%s qos:%u pubinterval:%u payloadsize:%u",
              CONFIG_WIFI_SSID, CONFIG_WIFI_PASSWORD, CONFIG_MQTT_SUB_TOPIC,
@@ -193,25 +210,24 @@ static void mqtt_client_thread(void *pvParameters)
         ESP_LOGI(TAG, "MQTT subscribe to topic %s OK", CONFIG_MQTT_SUB_TOPIC);
 
         for (;;) {
-            MQTTMessage message;
-
-            message.qos = CONFIG_DEFAULT_MQTT_PUB_QOS;
-            message.retained = 0;
-            message.payload = payload;
-            sprintf(payload, "message number %d", ++count);
-            message.payloadlen = strlen(payload);
-
-            if ((rc = MQTTPublish(&client, CONFIG_MQTT_PUB_TOPIC, &message)) != 0) {
-                ESP_LOGE(TAG, "Return code from MQTT publish is %d", rc);
-            } else {
-                ESP_LOGI(TAG, "MQTT published topic %s, len:%u heap:%u", CONFIG_MQTT_PUB_TOPIC, message.payloadlen, esp_get_free_heap_size());
-            }
-
-            if (rc != 0) {
-                break;
-            }
-
-            vTaskDelay(CONFIG_MQTT_PUBLISH_INTERVAL / portTICK_RATE_MS);
+//            MQTTMessage message;
+//            message.qos = CONFIG_DEFAULT_MQTT_PUB_QOS;
+//            message.retained = 0;
+//            message.payload = payload;
+//            sprintf(payload, "message number %d", ++count); // send data
+//            message.payloadlen = strlen(payload);
+//            ESP_LOGI(TAG,"test\n");
+//            if ((rc = MQTTPublish(&client, CONFIG_MQTT_PUB_TOPIC, &message)) != 0) {
+//                ESP_LOGE(TAG, "Return code from MQTT publish is %d", rc);
+//            } else {
+//                ESP_LOGI(TAG, "MQTT published topic %s, len:%u heap:%u", CONFIG_MQTT_PUB_TOPIC, message.payloadlen, esp_get_free_heap_size());
+//            }
+//            ESP_LOGI(TAG,"test\n");
+//            if (rc != 0) {
+//                break;
+//            }
+            vTaskDelay( 1000 / portTICK_RATE_MS);
+            //vTaskDelay(CONFIG_MQTT_PUBLISH_INTERVAL / portTICK_RATE_MS);
         }
 
         network.disconnect(&network);
@@ -221,6 +237,37 @@ static void mqtt_client_thread(void *pvParameters)
     vTaskDelete(NULL);
     return;
 }
+
+
+static void led_client_thread(void *pvParameters)
+{
+	char Ledstatus[40] = {0};
+	int cnt = 0;
+	//Init_GPIO
+	gpio_config_t io_conf;
+	io_conf.intr_type = GPIO_INTR_DISABLE;
+	io_conf.mode = GPIO_MODE_OUTPUT;
+	io_conf.pin_bit_mask = GPIO_OUTPUT_PIN_SEL;
+	io_conf.pull_down_en = 0;
+	io_conf.pull_up_en = 0;
+	gpio_config(&io_conf);
+	ESP_LOGI(TAG, "LED Init OK");
+	//Data handle
+	while(1){
+		//wait data and analytical processing
+		//没有编写的后面获取数据是乱码
+		ESP_LOGI(TAG,"Ledstatus = %s",Ledstatus);
+		if (xQueueReceive(gpio_evt_queue, Ledstatus, portMAX_DELAY)){
+			ESP_LOGI(TAG, "Ledstatus = %s",Ledstatus);
+		 memset(Ledstatus,0,sizeof(Ledstatus));
+		}
+		gpio_set_level(GPIO_OUTPUT_IO_0, (cnt++) % 2);
+		ESP_LOGI(TAG, "LED pthread is running");
+	}
+
+	return ;
+}
+
 
 void app_main(void)
 {
@@ -233,9 +280,22 @@ void app_main(void)
     }
 
     ESP_ERROR_CHECK(ret);
+    //parma 项目数
+    //一个项目的字符传输的最大数据量
+    gpio_evt_queue = xQueueCreate(40, 40);
+    //LED_INIT
+    ret = xTaskCreate(&led_client_thread,
+                      LED_CLIENT_THREAD_NAME,
+                      LED_CLIENT_THREAD_STACK_WORDS,
+                      NULL,
+                      LED_CLIENT_THREAD_PRIO,
+                      NULL);
 
+    if (ret != pdPASS)  {
+        ESP_LOGE(TAG, "mqtt create client thread %s failed", MQTT_CLIENT_THREAD_NAME);
+    }
+    // MQTT_INIT
     initialise_wifi();
-
     ret = xTaskCreate(&mqtt_client_thread,
                       MQTT_CLIENT_THREAD_NAME,
                       MQTT_CLIENT_THREAD_STACK_WORDS,
@@ -246,4 +306,5 @@ void app_main(void)
     if (ret != pdPASS)  {
         ESP_LOGE(TAG, "mqtt create client thread %s failed", MQTT_CLIENT_THREAD_NAME);
     }
+
 }

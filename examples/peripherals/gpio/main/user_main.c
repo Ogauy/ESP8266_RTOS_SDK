@@ -49,6 +49,7 @@ static const char *TAG = "main";
 
 static xQueueHandle gpio_evt_queue = NULL;
 
+//zhongduan
 static void gpio_isr_handler(void *arg)
 {
     uint32_t gpio_num = (uint32_t) arg;
@@ -58,7 +59,6 @@ static void gpio_isr_handler(void *arg)
 static void gpio_task_example(void *arg)
 {
     uint32_t io_num;
-
     for (;;) {
         if (xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) {
             ESP_LOGI(TAG, "GPIO[%d] intr, val: %d\n", io_num, gpio_get_level(io_num));
